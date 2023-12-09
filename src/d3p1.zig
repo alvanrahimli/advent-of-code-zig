@@ -11,12 +11,13 @@ pub fn main() !void {
 
     var totalSum: i32 = 0;
 
-    var line = std.ArrayList(u8).init(allocator);
-    try fileReader.streamUntilDelimiter(line.writer(), '\n', null);
-    defer line.deinit();
+    var firstLine = try nextLine(allocator, fileReader);
 
-    var lines = try LineStack.init(allocator, line.items.len);
-    try lines.push(line);
+    var lines = try LineStack.init(allocator, firstLine.items.len);
+    defer lines.deinit();
+
+    try lines.push(firstLine);
+    firstLine.deinit();
 
     var firstEOFHappened = false;
     while (true) {
@@ -33,8 +34,7 @@ pub fn main() !void {
 
         var i: usize = 0;
         while (i < lines.currentLine.items.len) {
-            // var el = lines.currentLine.items[i];
-            if (lines.currentLine.items[i] < '0' or lines.currentLine.items[i] > '9') {
+            if (!isDigit(lines.currentLine.items[i])) {
                 i += 1;
                 continue;
             }
@@ -43,11 +43,10 @@ pub fn main() !void {
             defer numStr.deinit();
 
             var isEngineNumber = false;
-            while (i < lines.currentLine.items.len and (lines.currentLine.items[i] >= '0' and lines.currentLine.items[i] <= '9')) {
+            while (i < lines.currentLine.items.len and isDigit(lines.currentLine.items[i])) {
                 try numStr.append(lines.currentLine.items[i]);
 
-                const touchesSymbol = checkSurroundings(i, &lines);
-                if (touchesSymbol) {
+                if (lines.touchesASymbol(i)) {
                     isEngineNumber = true;
                 }
                 i += 1;
@@ -55,96 +54,77 @@ pub fn main() !void {
 
             if (isEngineNumber) {
                 const number = try std.fmt.parseInt(i32, numStr.items, 10);
-                // if (number == 150) {
-                //     std.debug.print("{d}, ", .{number});
-                // }
-                std.debug.print("[{d}] {d}, ", .{ i, number });
                 totalSum += number;
             }
         }
-        std.debug.print("\n", .{});
-        lines.dump();
-        std.debug.print("\n---------\n", .{});
     }
 
-    std.debug.print("TOTAL: {d}, push: {d}", .{ totalSum, lines.pushCount });
-}
-
-pub fn checkSurroundings(i: usize, lines: *const LineStack) bool {
-    if (lines.currentLine.items[i] < '0' or lines.currentLine.items[i] > '9')
-        return false;
-
-    // Left
-    if (i > 1) {
-        if (lines.topLine.items.len > 0 and isSymbol(lines.topLine.items[i - 1])) {
-            return true;
-        }
-        if (lines.currentLine.items.len > 0 and isSymbol(lines.currentLine.items[i - 1])) {
-            return true;
-        }
-        if (lines.bottomLine.items.len > 0 and isSymbol(lines.bottomLine.items[i - 1])) {
-            return true;
-        }
-    }
-
-    // Right
-    if ((i + 1) < lines.topLine.items.len) {
-        if (isSymbol(lines.topLine.items[i + 1])) {
-            return true;
-        }
-    }
-    if ((i + 1) < lines.currentLine.items.len) {
-        if (isSymbol(lines.currentLine.items[i + 1])) {
-            return true;
-        }
-    }
-    if ((i + 1) < lines.bottomLine.items.len) {
-        if (isSymbol(lines.bottomLine.items[i + 1])) {
-            return true;
-        }
-    }
-
-    // Top
-    if (lines.topLine.items.len > 0 and isSymbol(lines.topLine.items[i])) {
-        return true;
-    }
-
-    // Bottom
-    if (lines.bottomLine.items.len > 0 and isSymbol(lines.bottomLine.items[i])) {
-        return true;
-    }
-
-    return false;
+    std.debug.print("TOTAL: {d}", .{totalSum});
 }
 
 pub inline fn isSymbol(char: u8) bool {
-    return !((char > '0' and char < '9') or char == '.');
+    return !isDigit(char) and char != '.';
+}
+pub inline fn isDigit(c: u8) bool {
+    return c >= '0' and c <= '9';
 }
 
 const LineStack = struct {
     topLine: std.ArrayList(u8),
     currentLine: std.ArrayList(u8),
     bottomLine: std.ArrayList(u8),
-    pushCount: i32,
 
     pub fn init(allocator: std.mem.Allocator, len: usize) !LineStack {
-        var topLine = try std.ArrayList(u8).initCapacity(allocator, len);
-        var currentLine = try std.ArrayList(u8).initCapacity(allocator, len);
-        var bottomLine = try std.ArrayList(u8).initCapacity(allocator, len);
         return .{
-            .topLine = topLine,
-            .currentLine = currentLine,
-            .bottomLine = bottomLine,
-            .pushCount = 0,
+            .topLine = try std.ArrayList(u8).initCapacity(allocator, len),
+            .currentLine = try std.ArrayList(u8).initCapacity(allocator, len),
+            .bottomLine = try std.ArrayList(u8).initCapacity(allocator, len),
         };
     }
 
     pub fn push(self: *LineStack, line: std.ArrayList(u8)) !void {
-        self.topLine = try self.currentLine.clone();
-        self.currentLine = try self.bottomLine.clone();
+        self.topLine.deinit();
+        self.topLine = self.currentLine;
+        self.currentLine = self.bottomLine;
         self.bottomLine = try line.clone();
-        self.pushCount += 1;
-        std.debug.print("pushed ({d}) {s}\n", .{ self.pushCount, line.items });
+    }
+
+    pub fn touchesASymbol(self: *LineStack, i: usize) bool {
+        // Left
+        if (i > 1) {
+            if (self.topLine.items.len > 0 and isSymbol(self.topLine.items[i - 1])) {
+                return true;
+            }
+            if (self.currentLine.items.len > 0 and isSymbol(self.currentLine.items[i - 1])) {
+                return true;
+            }
+            if (self.bottomLine.items.len > 0 and isSymbol(self.bottomLine.items[i - 1])) {
+                return true;
+            }
+        }
+
+        // Right
+        if ((i + 1) < self.topLine.items.len and isSymbol(self.topLine.items[i + 1])) {
+            return true;
+        }
+        if ((i + 1) < self.currentLine.items.len and isSymbol(self.currentLine.items[i + 1])) {
+            return true;
+        }
+        if ((i + 1) < self.bottomLine.items.len and isSymbol(self.bottomLine.items[i + 1])) {
+            return true;
+        }
+
+        // Top
+        if (self.topLine.items.len > 0 and isSymbol(self.topLine.items[i])) {
+            return true;
+        }
+
+        // Bottom
+        if (self.bottomLine.items.len > 0 and isSymbol(self.bottomLine.items[i])) {
+            return true;
+        }
+
+        return false;
     }
 
     pub fn dump(lines: LineStack) void {
@@ -152,8 +132,15 @@ const LineStack = struct {
         std.debug.print("CRR > {s}\n", .{lines.currentLine.items});
         std.debug.print("BOT > {s}\n", .{lines.bottomLine.items});
     }
+
+    pub fn deinit(self: *LineStack) void {
+        self.topLine.deinit();
+        self.currentLine.deinit();
+        self.bottomLine.deinit();
+    }
 };
 
+/// Returns next line, but doesn't handle error.EndOfStream
 pub fn nextLine(allocator: std.mem.Allocator, reader: std.fs.File.Reader) !std.ArrayList(u8) {
     var line = std.ArrayList(u8).init(allocator);
     reader.streamUntilDelimiter(line.writer(), '\n', null) catch |err| switch (err) {
@@ -161,18 +148,4 @@ pub fn nextLine(allocator: std.mem.Allocator, reader: std.fs.File.Reader) !std.A
         else => return err,
     };
     return line;
-}
-
-test "Should check surroundings correctly" {
-    const top = [_]u8{ '.', '.', '#', '.', '4' };
-    const crr = [_]u8{ '.', '2', '2', '.', '4' };
-    const bot = [_]u8{ '.', '.', '#', '.', '4' };
-
-    const lines = LineStack{
-        .topLine = top[0..],
-        .currentLine = crr[0..],
-        .bottomLine = bot[0..],
-    };
-
-    try std.testing.expect(checkSurroundings(1, &lines));
 }
