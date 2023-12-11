@@ -1,5 +1,5 @@
 const std = @import("std");
-const task = @import("d4p2.zig");
+const task = @import("d5p1.zig");
 
 pub fn main() !void {
     try task.main();
